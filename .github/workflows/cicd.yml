@@ -10,8 +10,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-test:
-    name: Build and test Docker image
+  build-test-publish:
+    name: Build, Test and Publish Docker Image
+    # Only publish from pushes to main, never from pull requests.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
@@ -26,18 +28,33 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: vle5-devops-app:ci
 
       - name: Run container smoke test
         run: |
-          docker build -t vle5-devops-app:ci .
           docker run -d --name vle5-test -p 8080:80 vle5-devops-app:ci
           trap 'docker rm -f vle5-test >/dev/null 2>&1 || true' EXIT
+
           for i in $(seq 1 15); do
             if curl --fail --silent http://localhost:8080/ > /tmp/vle5-response.html; then
               break
             fi
             sleep 2
           done
+
           grep -q "VLE-5 DevOps Pipeline" /tmp/vle5-response.html
           grep -q "Application is running successfully!" /tmp/vle5-response.html
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push image to Docker Hub
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: giriraju005/vle5-devops-app:latest
